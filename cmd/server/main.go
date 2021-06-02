@@ -161,7 +161,7 @@ func (o *ProxyRunOptions) Flags() *pflag.FlagSet {
 	flags.Float32Var(&o.kubeconfigQPS, "kubeconfig-qps", o.kubeconfigQPS, "Maximum client QPS (proxy server uses this client to authenticate agent tokens).")
 	flags.IntVar(&o.kubeconfigBurst, "kubeconfig-burst", o.kubeconfigBurst, "Maximum client burst (proxy server uses this client to authenticate agent tokens).")
 	flags.StringVar(&o.authenticationAudience, "authentication-audience", o.authenticationAudience, "Expected agent's token authentication audience (used with agent-namespace, agent-service-account, kubeconfig).")
-	flags.StringVar(&o.proxyStrategies, "proxy-strategies", o.proxyStrategies, "The list of proxy strategies used by the server to pick a backend/tunnel, available strategies are: default, destHost.")
+	flags.StringVar(&o.proxyStrategies, "proxy-strategies", o.proxyStrategies, "The list of proxy strategies used by the server to pick a backend/tunnel, available strategies are: default, defaultRoute, destHost.")
 	return flags
 }
 
@@ -313,8 +313,9 @@ func (o *ProxyRunOptions) Validate() error {
 			switch ps {
 			case string(server.ProxyStrategyDestHost):
 			case string(server.ProxyStrategyDefault):
+			case string(server.ProxyStrategyDefaultRoute):
 			default:
-				return fmt.Errorf("unknown proxy strategy: %s, available strategy are: default, destHost", ps)
+				return fmt.Errorf("unknown proxy strategy: %s, available strategy are: default, defaultRoute, destHost", ps)
 			}
 		}
 	}

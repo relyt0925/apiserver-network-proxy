@@ -43,7 +43,7 @@ var (
 
 // ServerMetrics includes all the metrics of the proxy server.
 type ServerMetrics struct {
-	latencies *prometheus.HistogramVec
+	latencies   *prometheus.HistogramVec
 	connections *prometheus.GaugeVec
 }
 
@@ -70,7 +70,7 @@ func newServerMetrics() *ServerMetrics {
 			"service_method",
 		},
 	)
-	
+
 	prometheus.MustRegister(latencies)
 	prometheus.MustRegister(connections)
 	return &ServerMetrics{latencies: latencies, connections: connections}
