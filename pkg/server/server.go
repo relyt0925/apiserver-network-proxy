@@ -315,6 +315,8 @@ func NewProxyServer(serverID string, proxyStrategies []ProxyStrategy, serverCoun
 			bms = append(bms, NewDestHostBackendManager())
 		case ProxyStrategyDefault:
 			bms = append(bms, NewDefaultBackendManager())
+		case ProxyStrategyDefaultRoute:
+			bms = append(bms, NewDefaultRouteBackendManager())
 		default:
 			klog.V(4).InfoS("Unknonw proxy strategy", "strategy", ps)
 		}
