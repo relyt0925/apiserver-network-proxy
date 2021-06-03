@@ -204,6 +204,7 @@ func validateAgentIdentifiers(agentIdentifiers string) error {
 		case agent.IPv6:
 		case agent.CIDR:
 		case agent.Host:
+		case agent.DefaultRoute:
 		default:
 			return fmt.Errorf("unknown address type: %s", idType)
 		}
