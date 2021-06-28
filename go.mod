@@ -5,13 +5,13 @@ go 1.16
 require (
 	github.com/golang/mock v1.4.4
 	github.com/golang/protobuf v1.4.2
-	github.com/google/uuid v1.1.1
+	github.com/google/uuid v1.1.2
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.7.1
 	github.com/spf13/cobra v0.0.3
 	github.com/spf13/pflag v1.0.5
 	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b
-	google.golang.org/grpc v1.27.0
+	google.golang.org/grpc v1.38.0
 	k8s.io/api v0.19.10
 	k8s.io/apimachinery v0.19.10
 	k8s.io/client-go v0.19.10
