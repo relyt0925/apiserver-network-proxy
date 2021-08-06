@@ -46,11 +46,21 @@ type connContext struct {
 	cleanFunc func()
 	dataCh    chan []byte
 	cleanOnce sync.Once
-	dialDone  chan struct{}
 }
 
 func (c *connContext) cleanup() {
 	c.cleanOnce.Do(c.cleanFunc)
+}
+
+func (c *connContext) send(msg []byte) {
+	// TODO (cheftako@): Get perf test working and compare this solution with a lock based solution.
+	defer func() {
+		// Handles the race condition where we write to a closed channel
+		if err := recover(); err != nil {
+			klog.InfoS("Recovered from attempt to write to closed channel")
+		}
+	}()
+	c.dataCh <- msg
 }
 
 type connectionManager struct {
@@ -361,73 +371,62 @@ func (a *Client) Serve() {
 
 		switch pkt.Type {
 		case client.PacketType_DIAL_REQ:
-			go func() {
-				klog.V(4).Infoln("received DIAL_REQ")
-				resp := &client.Packet{
-					Type:    client.PacketType_DIAL_RSP,
-					Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},
+			klog.V(4).Infoln("received DIAL_REQ")
+			resp := &client.Packet{
+				Type:    client.PacketType_DIAL_RSP,
+				Payload: &client.Packet_DialResponse{DialResponse: &client.DialResponse{}},
+			}
+
+			dialReq := pkt.GetDialRequest()
+			resp.GetDialResponse().Random = dialReq.Random
+
+			start := time.Now()
+			conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
+			if err != nil {
+				resp.GetDialResponse().Error = err.Error()
+				if err := a.Send(resp); err != nil {
+					klog.ErrorS(err, "could not send stream")
 				}
+				continue
+			}
+			metrics.Metrics.ObserveDialLatency(time.Since(start))
 
-				dialReq := pkt.GetDialRequest()
-				resp.GetDialResponse().Random = dialReq.Random
+			connID := atomic.AddInt64(&a.nextConnID, 1)
+			dataCh := make(chan []byte, 5)
+			ctx := &connContext{
+				conn:   conn,
+				dataCh: dataCh,
+				cleanFunc: func() {
+					klog.V(4).InfoS("close connection", "connectionID", connID)
+					resp := &client.Packet{
+						Type:    client.PacketType_CLOSE_RSP,
+						Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
+					}
+					resp.GetCloseResponse().ConnectID = connID
 
-				connID := atomic.AddInt64(&a.nextConnID, 1)
-				dataCh := make(chan []byte, 5)
-				dialDone := make(chan struct{})
-				ctx := &connContext{
-					dataCh: dataCh,
-					dialDone: dialDone,
-				}
-				ctx.cleanFunc = func() {
-					<- dialDone
-					if ctx.conn != nil {
-						klog.V(4).InfoS("close connection", "connectionID", connID)
-						resp := &client.Packet{
-							Type:    client.PacketType_CLOSE_RSP,
-							Payload: &client.Packet_CloseResponse{CloseResponse: &client.CloseResponse{}},
-						}
-						resp.GetCloseResponse().ConnectID = connID
+					err := conn.Close()
+					if err != nil {
+						resp.GetCloseResponse().Error = err.Error()
+					}
 
-						err := ctx.conn.Close()
-						if err != nil {
-							resp.GetCloseResponse().Error = err.Error()
-						}
-
-						if err := a.Send(resp); err != nil {
-							klog.ErrorS(err, "close response failure")
-						}
+					if err := a.Send(resp); err != nil {
+						klog.ErrorS(err, "close response failure")
 					}
 
 					close(dataCh)
 					a.connManager.Delete(connID)
-				}
-				a.connManager.Add(connID, ctx)
+				},
+			}
+			a.connManager.Add(connID, ctx)
 
-				start := time.Now()
-				conn, err := net.DialTimeout(dialReq.Protocol, dialReq.Address, dialTimeout)
-				if err != nil {
-					a.connManager.Delete(connID)
-					resp.GetDialResponse().Error = err.Error()
-					if err := a.Send(resp); err != nil {
-						klog.ErrorS(err, "could not send stream")
-					}
-					return
-				}
-				metrics.Metrics.ObserveDialLatency(time.Since(start))
+			resp.GetDialResponse().ConnectID = connID
+			if err := a.Send(resp); err != nil {
+				klog.ErrorS(err, "stream send failure")
+				continue
+			}
 
-				ctx.conn = conn
-				close(dialDone)
-
-				resp.GetDialResponse().ConnectID = connID
-				if err := a.Send(resp); err != nil {
-					klog.ErrorS(err, "stream send failure")
-					return
-				}
-
-				go a.remoteToProxy(connID, ctx)
-				go a.proxyToRemote(connID, ctx)
-
-			}()
+			go a.remoteToProxy(connID, ctx)
+			go a.proxyToRemote(connID, ctx)
 
 		case client.PacketType_DATA:
 			data := pkt.GetData()
@@ -435,7 +434,7 @@ func (a *Client) Serve() {
 
 			ctx, ok := a.connManager.Get(data.ConnectID)
 			if ok {
-				ctx.dataCh <- data.Data
+				ctx.send(data.Data)
 			}
 
 		case client.PacketType_CLOSE_REQ:

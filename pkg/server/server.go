@@ -97,6 +97,7 @@ func (pm *PendingDialManager) Add(random int64, clientConn *ProxyClientConnectio
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	pm.pendingDial[random] = clientConn
+	metrics.Metrics.SetPendingDialCount(len(pm.pendingDial))
 }
 
 func (pm *PendingDialManager) Get(random int64) (*ProxyClientConnection, bool) {
@@ -110,6 +111,7 @@ func (pm *PendingDialManager) Remove(random int64) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	delete(pm.pendingDial, random)
+	metrics.Metrics.SetPendingDialCount(len(pm.pendingDial))
 }
 
 // ProxyServer
@@ -444,6 +446,13 @@ func (s *ProxyServer) serveRecvFrontend(stream client.ProxyService_ProxyServer, 
 				klog.ErrorS(err, "CLOSE_REQ to Backend failed")
 			}
 			klog.V(5).Infoln("CLOSE_REQ sent to backend")
+
+		case client.PacketType_DIAL_CLS:
+			random := pkt.GetCloseDial().Random
+			klog.V(5).InfoS("Received DIAL_CLOSE", "random", random)
+			// Currently not worrying about backend as we do not have an established connection,
+			s.PendingDial.Remove(random)
+			klog.V(5).Infoln("Removing pending dial request", "random", random)
 
 		case client.PacketType_DATA:
 			connID := pkt.GetData().ConnectID
