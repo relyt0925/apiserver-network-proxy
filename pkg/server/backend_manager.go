@@ -101,9 +101,9 @@ func newBackend(conn agent.AgentService_ConnectServer) *backend {
 // connections, i.e., get, add and remove
 type BackendStorage interface {
 	// AddBackend adds a backend.
-	AddBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend
+	AddBackend(agentID string, identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend
 	// RemoveBackend removes a backend.
-	RemoveBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer)
+	RemoveBackend(agentID string, identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer)
 	// NumBackends returns the number of backends.
 	NumBackends() int
 }
@@ -146,6 +146,10 @@ type DefaultBackendStorage struct {
 	// randomly pick a key from a map (in this case, the backends) in
 	// Golang.
 	agentIDs []string
+
+	// hostToUniqueAgentIDTracker tracks if hosts are
+	hostToUniqueAgentIDTracker map[string][]string
+
 	// defaultRouteAgentIDs tracks the agents that have claimed the default route.
 	defaultRouteAgentIDs []string
 	random               *rand.Rand
@@ -183,7 +187,7 @@ func containIDType(idTypes []pkgagent.IdentifierType, idType pkgagent.Identifier
 }
 
 // AddBackend adds a backend.
-func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend {
+func (s *DefaultBackendStorage) AddBackend(agentID string, identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) Backend {
 	if !containIDType(s.idTypes, idType) {
 		klog.V(4).InfoS("fail to add backend", "backend", identifier, "error", &ErrWrongIDType{idType, s.idTypes})
 		return nil
@@ -209,11 +213,28 @@ func (s *DefaultBackendStorage) AddBackend(identifier string, idType pkgagent.Id
 	if idType == pkgagent.DefaultRoute {
 		s.defaultRouteAgentIDs = append(s.defaultRouteAgentIDs, identifier)
 	}
+	if idType == pkgagent.IPv4 || idType == pkgagent.IPv6 || idType == pkgagent.Host {
+		agentIDExistsForHostAdded := false
+		if uniqueAgentIDs, ok := s.hostToUniqueAgentIDTracker[identifier]; ok && len(uniqueAgentIDs) > 0 {
+			for _, uniqueAgentIDForHost := range s.hostToUniqueAgentIDTracker[identifier] {
+				if uniqueAgentIDForHost == agentID {
+					agentIDExistsForHostAdded = true
+					break
+				}
+			}
+		}
+		if !agentIDExistsForHostAdded {
+			if uniqueAgentIDSlice, ok := s.hostToUniqueAgentIDTracker[identifier]; !ok || len(uniqueAgentIDSlice) == 0 {
+				s.hostToUniqueAgentIDTracker[identifier] = []string{}
+			}
+			s.hostToUniqueAgentIDTracker[identifier] = append(s.hostToUniqueAgentIDTracker[identifier], agentID)
+		}
+	}
 	return addedBackend
 }
 
 // RemoveBackend removes a backend.
-func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) {
+func (s *DefaultBackendStorage) RemoveBackend(agentID string, identifier string, idType pkgagent.IdentifierType, conn agent.AgentService_ConnectServer) {
 	if !containIDType(s.idTypes, idType) {
 		klog.ErrorS(&ErrWrongIDType{idType, s.idTypes}, "fail to remove backend")
 		return
@@ -250,6 +271,17 @@ func (s *DefaultBackendStorage) RemoveBackend(identifier string, idType pkgagent
 				if s.defaultRouteAgentIDs[i] == identifier {
 					s.defaultRouteAgentIDs = append(s.defaultRouteAgentIDs[:i], s.defaultRouteAgentIDs[i+1:]...)
 					break
+				}
+			}
+		}
+		if idType == pkgagent.IPv4 || idType == pkgagent.IPv6 || idType == pkgagent.Host {
+			if uniqueAgentIDs, ok := s.hostToUniqueAgentIDTracker[identifier]; ok && len(uniqueAgentIDs) > 0 {
+				for i := range s.hostToUniqueAgentIDTracker[identifier] {
+					if s.hostToUniqueAgentIDTracker[identifier][i] == agentID {
+						s.hostToUniqueAgentIDTracker[identifier][i] = s.hostToUniqueAgentIDTracker[identifier][len(s.hostToUniqueAgentIDTracker)-1]
+						s.hostToUniqueAgentIDTracker[identifier] = s.hostToUniqueAgentIDTracker[identifier][:len(s.hostToUniqueAgentIDTracker[identifier])-1]
+						break
+					}
 				}
 			}
 		}
